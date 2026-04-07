@@ -374,11 +374,66 @@ export async function deleteMessage(messageId: string): Promise<void> {
 }
 
 /**
- * Delete old messages (called by Cloud Function)
- * This is handled server-side by Cloud Functions
+ * Delete old messages (client-side cleanup)
+ * Messages older than 24 hours are automatically deleted
+ * This runs in the background without affecting user experience
  */
 export async function cleanupOldMessages(): Promise<void> {
-  // This is handled by Firebase Cloud Functions
-  // See README for setup instructions
-  console.log('Message cleanup is handled by Cloud Functions');
+  if (!isFirebaseConfigured() || !db) {
+    return;
+  }
+
+  try {
+    const { where, getDocs } = await import('firebase/firestore');
+    const now = Date.now();
+    const oneDayAgo = now - (24 * 60 * 60 * 1000);
+
+    // Query messages older than 24 hours
+    const messagesCollection = collection(db, 'messages');
+    const q = query(
+      messagesCollection,
+      where('createdAt', '<', Timestamp.fromMillis(oneDayAgo))
+    );
+
+    const snapshot = await getDocs(q);
+    let deletedCount = 0;
+
+    // Delete old messages in batches
+    const batch = db.batch ? (await import('firebase/firestore')).writeBatch(db) : null;
+    if (batch) {
+      snapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+        deletedCount++;
+      });
+      await batch.commit();
+    } else {
+      // Fallback: delete individually if batch not available
+      for (const doc of snapshot.docs) {
+        await deleteDoc(doc.ref);
+        deletedCount++;
+      }
+    }
+
+    if (deletedCount > 0) {
+      console.log(`Cleaned up ${deletedCount} old messages`);
+    }
+  } catch (error) {
+    console.debug('Message cleanup skipped (this is normal):', error);
+  }
+}
+
+/**
+ * Start periodic message cleanup (runs every hour)
+ */
+export function startMessageCleanup(): () => void {
+  // Run cleanup immediately on first load
+  cleanupOldMessages();
+
+  // Then run every hour
+  const intervalId = setInterval(() => {
+    cleanupOldMessages();
+  }, 60 * 60 * 1000); // 1 hour
+
+  // Return cleanup function
+  return () => clearInterval(intervalId);
 }

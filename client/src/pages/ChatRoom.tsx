@@ -10,6 +10,7 @@ import {
   setTypingIndicator,
   addReaction,
   removeReaction,
+  startMessageCleanup,
 } from '@/lib/firebaseService';
 import TopBar from '@/components/TopBar';
 import MessageList from '@/components/MessageList';
@@ -39,6 +40,7 @@ interface ChatRoomProps {
  * - Shows typing indicators and online count
  * - Supports message reactions and long-press context menu
  * - Integrates with Firebase for real-time sync
+ * - Automatically cleans up old messages (24+ hours)
  */
 export default function ChatRoom({ username, onLeave }: ChatRoomProps) {
   const { theme, toggleTheme } = useTheme();
@@ -75,6 +77,10 @@ export default function ChatRoom({ username, onLeave }: ChatRoomProps) {
         setTypingUsers(users.filter(u => u !== username));
       });
       unsubscribeRef.current.push(unsubscribeTyping);
+
+      // Start periodic message cleanup (deletes messages older than 24 hours)
+      const stopCleanup = startMessageCleanup();
+      unsubscribeRef.current.push(stopCleanup);
     } catch (error) {
       console.error('Error initializing Firebase subscriptions:', error);
     }
