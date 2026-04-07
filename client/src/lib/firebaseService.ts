@@ -16,9 +16,6 @@ import {
   doc,
   updateDoc,
   Timestamp,
-  Query,
-  QueryConstraint,
-  where,
 } from 'firebase/firestore';
 import {
   ref,
@@ -33,7 +30,7 @@ import {
   onValue,
   off,
 } from 'firebase/database';
-import { db, storage, realtimeDb } from './firebase';
+import { db, storage, realtimeDb, isFirebaseConfigured } from './firebase';
 
 interface Message {
   id: string;
@@ -55,29 +52,39 @@ interface Message {
 export function subscribeToMessages(
   callback: (messages: Message[]) => void
 ): () => void {
-  const messagesCollection = collection(db, 'messages');
-  const q = query(messagesCollection, orderBy('createdAt', 'asc'));
+  if (!isFirebaseConfigured() || !db) {
+    console.warn('Firebase not configured. Messages will not sync.');
+    return () => {};
+  }
 
-  const unsubscribe = onSnapshot(q, (snapshot) => {
-    const messages: Message[] = [];
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      messages.push({
-        id: doc.id,
-        sender: data.sender,
-        type: data.type,
-        content: data.content,
-        fileName: data.fileName,
-        fileSize: data.fileSize,
-        reactions: data.reactions,
-        createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
-        expiresAt: data.expiresAt?.toMillis?.() || data.expiresAt || Date.now(),
+  try {
+    const messagesCollection = collection(db, 'messages');
+    const q = query(messagesCollection, orderBy('createdAt', 'asc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const messages: Message[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        messages.push({
+          id: doc.id,
+          sender: data.sender,
+          type: data.type,
+          content: data.content,
+          fileName: data.fileName,
+          fileSize: data.fileSize,
+          reactions: data.reactions,
+          createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+          expiresAt: data.expiresAt?.toMillis?.() || data.expiresAt || Date.now(),
+        });
       });
+      callback(messages);
     });
-    callback(messages);
-  });
 
-  return unsubscribe;
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error subscribing to messages:', error);
+    return () => {};
+  }
 }
 
 /**
@@ -90,21 +97,30 @@ export async function sendMessage(
   fileName?: string,
   fileSize?: number
 ): Promise<string> {
-  const now = Date.now();
-  const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
+  if (!isFirebaseConfigured() || !db) {
+    throw new Error('Firebase not configured. Please set environment variables.');
+  }
 
-  const docRef = await addDoc(collection(db, 'messages'), {
-    sender,
-    type,
-    content,
-    fileName,
-    fileSize,
-    reactions: {},
-    createdAt: Timestamp.now(),
-    expiresAt: Timestamp.fromMillis(expiresAt),
-  });
+  try {
+    const now = Date.now();
+    const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
 
-  return docRef.id;
+    const docRef = await addDoc(collection(db, 'messages'), {
+      sender,
+      type,
+      content,
+      fileName,
+      fileSize,
+      reactions: {},
+      createdAt: Timestamp.now(),
+      expiresAt: Timestamp.fromMillis(expiresAt),
+    });
+
+    return docRef.id;
+  } catch (error) {
+    console.error('Error sending message:', error);
+    throw error;
+  }
 }
 
 /**
@@ -115,14 +131,23 @@ export async function uploadMedia(
   messageId: string,
   type: 'image' | 'video' | 'audio' | 'file'
 ): Promise<string> {
-  const timestamp = Date.now();
-  const storagePath = `uploads/${type}/${timestamp}_${file.name}`;
-  const fileRef = ref(storage, storagePath);
+  if (!isFirebaseConfigured() || !storage) {
+    throw new Error('Firebase not configured. Please set environment variables.');
+  }
 
-  await uploadBytes(fileRef, file);
-  const downloadUrl = await getDownloadURL(fileRef);
+  try {
+    const timestamp = Date.now();
+    const storagePath = `uploads/${type}/${timestamp}_${file.name}`;
+    const fileRef = ref(storage, storagePath);
 
-  return downloadUrl;
+    await uploadBytes(fileRef, file);
+    const downloadUrl = await getDownloadURL(fileRef);
+
+    return downloadUrl;
+  } catch (error) {
+    console.error('Error uploading media:', error);
+    throw error;
+  }
 }
 
 /**
@@ -133,19 +158,29 @@ export async function addReaction(
   emoji: string,
   username: string
 ): Promise<void> {
-  const messageRef = doc(db, 'messages', messageId);
-  const messageSnap = await (await import('firebase/firestore')).getDoc(messageRef);
+  if (!isFirebaseConfigured() || !db) {
+    throw new Error('Firebase not configured. Please set environment variables.');
+  }
 
-  if (messageSnap.exists()) {
-    const reactions = messageSnap.data().reactions || {};
-    const emojiReactions = reactions[emoji] || [];
+  try {
+    const { getDoc } = await import('firebase/firestore');
+    const messageRef = doc(db, 'messages', messageId);
+    const messageSnap = await getDoc(messageRef);
 
-    if (!emojiReactions.includes(username)) {
-      emojiReactions.push(username);
+    if (messageSnap.exists()) {
+      const reactions = messageSnap.data().reactions || {};
+      const emojiReactions = reactions[emoji] || [];
+
+      if (!emojiReactions.includes(username)) {
+        emojiReactions.push(username);
+      }
+
+      reactions[emoji] = emojiReactions;
+      await updateDoc(messageRef, { reactions });
     }
-
-    reactions[emoji] = emojiReactions;
-    await updateDoc(messageRef, { reactions });
+  } catch (error) {
+    console.error('Error adding reaction:', error);
+    throw error;
   }
 }
 
@@ -157,25 +192,35 @@ export async function removeReaction(
   emoji: string,
   username: string
 ): Promise<void> {
-  const messageRef = doc(db, 'messages', messageId);
-  const messageSnap = await (await import('firebase/firestore')).getDoc(messageRef);
+  if (!isFirebaseConfigured() || !db) {
+    throw new Error('Firebase not configured. Please set environment variables.');
+  }
 
-  if (messageSnap.exists()) {
-    const reactions = messageSnap.data().reactions || {};
-    const emojiReactions = reactions[emoji] || [];
-    const index = emojiReactions.indexOf(username);
+  try {
+    const { getDoc } = await import('firebase/firestore');
+    const messageRef = doc(db, 'messages', messageId);
+    const messageSnap = await getDoc(messageRef);
 
-    if (index > -1) {
-      emojiReactions.splice(index, 1);
+    if (messageSnap.exists()) {
+      const reactions = messageSnap.data().reactions || {};
+      const emojiReactions = reactions[emoji] || [];
+      const index = emojiReactions.indexOf(username);
+
+      if (index > -1) {
+        emojiReactions.splice(index, 1);
+      }
+
+      if (emojiReactions.length === 0) {
+        delete reactions[emoji];
+      } else {
+        reactions[emoji] = emojiReactions;
+      }
+
+      await updateDoc(messageRef, { reactions });
     }
-
-    if (emojiReactions.length === 0) {
-      delete reactions[emoji];
-    } else {
-      reactions[emoji] = emojiReactions;
-    }
-
-    await updateDoc(messageRef, { reactions });
+  } catch (error) {
+    console.error('Error removing reaction:', error);
+    throw error;
   }
 }
 
@@ -183,17 +228,31 @@ export async function removeReaction(
  * Set user as online in Realtime Database
  */
 export function setUserOnline(username: string): () => void {
-  const userRef = dbRef(realtimeDb, `presence/${username}`);
+  if (!isFirebaseConfigured() || !realtimeDb) {
+    console.warn('Firebase not configured. Presence tracking disabled.');
+    return () => {};
+  }
 
-  set(userRef, {
-    online: true,
-    lastSeen: Date.now(),
-  });
+  try {
+    const userRef = dbRef(realtimeDb, `presence/${username}`);
 
-  // Return cleanup function to set user offline
-  return () => {
-    remove(userRef);
-  };
+    set(userRef, {
+      online: true,
+      lastSeen: Date.now(),
+    });
+
+    // Return cleanup function to set user offline
+    return () => {
+      try {
+        remove(userRef);
+      } catch (error) {
+        console.error('Error removing user from presence:', error);
+      }
+    };
+  } catch (error) {
+    console.error('Error setting user online:', error);
+    return () => {};
+  }
 }
 
 /**
@@ -202,38 +261,64 @@ export function setUserOnline(username: string): () => void {
 export function subscribeToOnlineCount(
   callback: (count: number) => void
 ): () => void {
-  const presenceRef = dbRef(realtimeDb, 'presence');
+  if (!isFirebaseConfigured() || !realtimeDb) {
+    console.warn('Firebase not configured. Online count disabled.');
+    return () => {};
+  }
 
-  const listener = onValue(presenceRef, (snapshot) => {
-    if (snapshot.exists()) {
-      const users = snapshot.val();
-      const onlineCount = Object.keys(users).length;
-      callback(onlineCount);
-    } else {
-      callback(0);
-    }
-  });
+  try {
+    const presenceRef = dbRef(realtimeDb, 'presence');
 
-  // Return unsubscribe function
-  return () => {
-    off(presenceRef, 'value', listener);
-  };
+    const listener = onValue(presenceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const users = snapshot.val();
+        const onlineCount = Object.keys(users).length;
+        callback(onlineCount);
+      } else {
+        callback(0);
+      }
+    });
+
+    // Return unsubscribe function
+    return () => {
+      try {
+        off(presenceRef, 'value', listener);
+      } catch (error) {
+        console.error('Error unsubscribing from online count:', error);
+      }
+    };
+  } catch (error) {
+    console.error('Error subscribing to online count:', error);
+    return () => {};
+  }
 }
 
 /**
  * Set typing indicator for user
  */
 export function setTypingIndicator(username: string): void {
-  const typingRef = dbRef(realtimeDb, `typing/${username}`);
-  set(typingRef, {
-    typing: true,
-    timestamp: Date.now(),
-  });
+  if (!isFirebaseConfigured() || !realtimeDb) {
+    return;
+  }
 
-  // Auto-clear after 3 seconds
-  setTimeout(() => {
-    remove(typingRef);
-  }, 3000);
+  try {
+    const typingRef = dbRef(realtimeDb, `typing/${username}`);
+    set(typingRef, {
+      typing: true,
+      timestamp: Date.now(),
+    });
+
+    // Auto-clear after 3 seconds
+    setTimeout(() => {
+      try {
+        remove(typingRef);
+      } catch (error) {
+        console.error('Error removing typing indicator:', error);
+      }
+    }, 3000);
+  } catch (error) {
+    console.error('Error setting typing indicator:', error);
+  }
 }
 
 /**
@@ -242,28 +327,50 @@ export function setTypingIndicator(username: string): void {
 export function subscribeToTypingIndicators(
   callback: (typingUsers: string[]) => void
 ): () => void {
-  const typingRef = dbRef(realtimeDb, 'typing');
+  if (!isFirebaseConfigured() || !realtimeDb) {
+    return () => {};
+  }
 
-  const listener = onValue(typingRef, (snapshot) => {
-    if (snapshot.exists()) {
-      const typingUsers = Object.keys(snapshot.val());
-      callback(typingUsers);
-    } else {
-      callback([]);
-    }
-  });
+  try {
+    const typingRef = dbRef(realtimeDb, 'typing');
 
-  // Return unsubscribe function
-  return () => {
-    off(typingRef, 'value', listener);
-  };
+    const listener = onValue(typingRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const typingUsers = Object.keys(snapshot.val());
+        callback(typingUsers);
+      } else {
+        callback([]);
+      }
+    });
+
+    // Return unsubscribe function
+    return () => {
+      try {
+        off(typingRef, 'value', listener);
+      } catch (error) {
+        console.error('Error unsubscribing from typing indicators:', error);
+      }
+    };
+  } catch (error) {
+    console.error('Error subscribing to typing indicators:', error);
+    return () => {};
+  }
 }
 
 /**
  * Delete a message
  */
 export async function deleteMessage(messageId: string): Promise<void> {
-  await deleteDoc(doc(db, 'messages', messageId));
+  if (!isFirebaseConfigured() || !db) {
+    throw new Error('Firebase not configured. Please set environment variables.');
+  }
+
+  try {
+    await deleteDoc(doc(db, 'messages', messageId));
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    throw error;
+  }
 }
 
 /**
