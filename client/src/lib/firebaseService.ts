@@ -1,0 +1,277 @@
+/**
+ * Firebase Service: Handles all Firebase operations
+ * - Real-time message sync
+ * - Media uploads
+ * - Presence tracking
+ * - Typing indicators
+ */
+
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  deleteDoc,
+  doc,
+  updateDoc,
+  Timestamp,
+  Query,
+  QueryConstraint,
+  where,
+} from 'firebase/firestore';
+import {
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject,
+} from 'firebase/storage';
+import {
+  ref as dbRef,
+  set,
+  remove,
+  onValue,
+  off,
+} from 'firebase/database';
+import { db, storage, realtimeDb } from './firebase';
+
+interface Message {
+  id: string;
+  sender: string;
+  type: 'text' | 'image' | 'video' | 'audio' | 'file';
+  content: string;
+  fileName?: string;
+  fileSize?: number;
+  reactions?: { [emoji: string]: string[] };
+  createdAt: number;
+  expiresAt: number;
+}
+
+/**
+ * Listen to real-time messages from Firestore
+ * @param callback - Function to call when messages change
+ * @returns Unsubscribe function
+ */
+export function subscribeToMessages(
+  callback: (messages: Message[]) => void
+): () => void {
+  const messagesCollection = collection(db, 'messages');
+  const q = query(messagesCollection, orderBy('createdAt', 'asc'));
+
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const messages: Message[] = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      messages.push({
+        id: doc.id,
+        sender: data.sender,
+        type: data.type,
+        content: data.content,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        reactions: data.reactions,
+        createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+        expiresAt: data.expiresAt?.toMillis?.() || data.expiresAt || Date.now(),
+      });
+    });
+    callback(messages);
+  });
+
+  return unsubscribe;
+}
+
+/**
+ * Send a text message to Firestore
+ */
+export async function sendMessage(
+  sender: string,
+  content: string,
+  type: 'text' | 'image' | 'video' | 'audio' | 'file' = 'text',
+  fileName?: string,
+  fileSize?: number
+): Promise<string> {
+  const now = Date.now();
+  const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
+
+  const docRef = await addDoc(collection(db, 'messages'), {
+    sender,
+    type,
+    content,
+    fileName,
+    fileSize,
+    reactions: {},
+    createdAt: Timestamp.now(),
+    expiresAt: Timestamp.fromMillis(expiresAt),
+  });
+
+  return docRef.id;
+}
+
+/**
+ * Upload media file to Firebase Storage
+ */
+export async function uploadMedia(
+  file: File,
+  messageId: string,
+  type: 'image' | 'video' | 'audio' | 'file'
+): Promise<string> {
+  const timestamp = Date.now();
+  const storagePath = `uploads/${type}/${timestamp}_${file.name}`;
+  const fileRef = ref(storage, storagePath);
+
+  await uploadBytes(fileRef, file);
+  const downloadUrl = await getDownloadURL(fileRef);
+
+  return downloadUrl;
+}
+
+/**
+ * Add reaction to a message
+ */
+export async function addReaction(
+  messageId: string,
+  emoji: string,
+  username: string
+): Promise<void> {
+  const messageRef = doc(db, 'messages', messageId);
+  const messageSnap = await (await import('firebase/firestore')).getDoc(messageRef);
+
+  if (messageSnap.exists()) {
+    const reactions = messageSnap.data().reactions || {};
+    const emojiReactions = reactions[emoji] || [];
+
+    if (!emojiReactions.includes(username)) {
+      emojiReactions.push(username);
+    }
+
+    reactions[emoji] = emojiReactions;
+    await updateDoc(messageRef, { reactions });
+  }
+}
+
+/**
+ * Remove reaction from a message
+ */
+export async function removeReaction(
+  messageId: string,
+  emoji: string,
+  username: string
+): Promise<void> {
+  const messageRef = doc(db, 'messages', messageId);
+  const messageSnap = await (await import('firebase/firestore')).getDoc(messageRef);
+
+  if (messageSnap.exists()) {
+    const reactions = messageSnap.data().reactions || {};
+    const emojiReactions = reactions[emoji] || [];
+    const index = emojiReactions.indexOf(username);
+
+    if (index > -1) {
+      emojiReactions.splice(index, 1);
+    }
+
+    if (emojiReactions.length === 0) {
+      delete reactions[emoji];
+    } else {
+      reactions[emoji] = emojiReactions;
+    }
+
+    await updateDoc(messageRef, { reactions });
+  }
+}
+
+/**
+ * Set user as online in Realtime Database
+ */
+export function setUserOnline(username: string): () => void {
+  const userRef = dbRef(realtimeDb, `presence/${username}`);
+
+  set(userRef, {
+    online: true,
+    lastSeen: Date.now(),
+  });
+
+  // Return cleanup function to set user offline
+  return () => {
+    remove(userRef);
+  };
+}
+
+/**
+ * Listen to online users count
+ */
+export function subscribeToOnlineCount(
+  callback: (count: number) => void
+): () => void {
+  const presenceRef = dbRef(realtimeDb, 'presence');
+
+  const listener = onValue(presenceRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const users = snapshot.val();
+      const onlineCount = Object.keys(users).length;
+      callback(onlineCount);
+    } else {
+      callback(0);
+    }
+  });
+
+  // Return unsubscribe function
+  return () => {
+    off(presenceRef, 'value', listener);
+  };
+}
+
+/**
+ * Set typing indicator for user
+ */
+export function setTypingIndicator(username: string): void {
+  const typingRef = dbRef(realtimeDb, `typing/${username}`);
+  set(typingRef, {
+    typing: true,
+    timestamp: Date.now(),
+  });
+
+  // Auto-clear after 3 seconds
+  setTimeout(() => {
+    remove(typingRef);
+  }, 3000);
+}
+
+/**
+ * Listen to typing indicators
+ */
+export function subscribeToTypingIndicators(
+  callback: (typingUsers: string[]) => void
+): () => void {
+  const typingRef = dbRef(realtimeDb, 'typing');
+
+  const listener = onValue(typingRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const typingUsers = Object.keys(snapshot.val());
+      callback(typingUsers);
+    } else {
+      callback([]);
+    }
+  });
+
+  // Return unsubscribe function
+  return () => {
+    off(typingRef, 'value', listener);
+  };
+}
+
+/**
+ * Delete a message
+ */
+export async function deleteMessage(messageId: string): Promise<void> {
+  await deleteDoc(doc(db, 'messages', messageId));
+}
+
+/**
+ * Delete old messages (called by Cloud Function)
+ * This is handled server-side by Cloud Functions
+ */
+export async function cleanupOldMessages(): Promise<void> {
+  // This is handled by Firebase Cloud Functions
+  // See README for setup instructions
+  console.log('Message cleanup is handled by Cloud Functions');
+}

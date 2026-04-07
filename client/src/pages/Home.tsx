@@ -1,25 +1,37 @@
-import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
-import { Streamdown } from 'streamdown';
+import { useState } from 'react';
+import JoinScreen from './JoinScreen';
+import ChatRoom from './ChatRoom';
 
 /**
- * All content in this page are only for example, replace with your own feature implementation
- * When building pages, remember your instructions in Frontend Best Practices, Design Guide and Common Pitfalls
+ * Home: Main page that routes between JoinScreen and ChatRoom
+ * - Shows JoinScreen until user enters valid username and password
+ * - Shows ChatRoom after successful join
+ * - Handles leave room to return to JoinScreen
  */
 export default function Home() {
-  // If theme is switchable in App.tsx, we can implement theme toggling like this:
-  // const { theme, toggleTheme } = useTheme();
+  const [username, setUsername] = useState<string | null>(null);
+
+  /**
+   * Handle user joining the room
+   */
+  const handleJoin = (name: string) => {
+    setUsername(name);
+  };
+
+  /**
+   * Handle user leaving the room
+   */
+  const handleLeave = () => {
+    setUsername(null);
+  };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <main>
-        {/* Example: lucide-react for icons */}
-        <Loader2 className="animate-spin" />
-        Example Page
-        {/* Example: Streamdown for markdown rendering */}
-        <Streamdown>Any **markdown** content</Streamdown>
-        <Button variant="default">Example Button</Button>
-      </main>
+    <div className="min-h-screen w-full">
+      {username ? (
+        <ChatRoom username={username} onLeave={handleLeave} />
+      ) : (
+        <JoinScreen onJoin={handleJoin} />
+      )}
     </div>
   );
 }
