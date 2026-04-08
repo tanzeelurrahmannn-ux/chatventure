@@ -32,6 +32,17 @@ import {
 } from 'firebase/database';
 import { db, storage, realtimeDb, isFirebaseConfigured } from './firebase';
 
+/**
+ * Sanitize username for use in Firebase paths
+ * Firebase paths can't contain: . # $ [ ]
+ * Replace spaces and special chars with underscores
+ */
+function sanitizeUsername(username: string): string {
+  return username
+    .replace(/[\s.#$\[\]]/g, '_')
+    .substring(0, 50); // Limit to 50 chars
+}
+
 interface Message {
   id: string;
   sender: string;
@@ -312,7 +323,8 @@ export function setTypingIndicator(username: string): void {
   }
 
   try {
-    const typingRef = dbRef(realtimeDb, `typing/${username}`);
+    const sanitizedUsername = sanitizeUsername(username);
+    const typingRef = dbRef(realtimeDb, `typing/${sanitizedUsername}`);
     set(typingRef, {
       typing: true,
       timestamp: Date.now(),
