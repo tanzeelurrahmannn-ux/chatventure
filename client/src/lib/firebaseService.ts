@@ -97,7 +97,10 @@ export async function sendMessage(
   fileName?: string,
   fileSize?: number
 ): Promise<string> {
+  console.log('📤 sendMessage called:', { sender, type, contentLength: content.length });
+  
   if (!isFirebaseConfigured() || !db) {
+    console.error('❌ Firebase not configured');
     throw new Error('Firebase not configured. Please set environment variables.');
   }
 
@@ -105,20 +108,27 @@ export async function sendMessage(
     const now = Date.now();
     const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
 
-    const docRef = await addDoc(collection(db, 'messages'), {
+    console.log('📝 Adding message to Firestore...');
+    // Build message object without undefined fields
+    const messageData: any = {
       sender,
       type,
       content,
-      fileName,
-      fileSize,
       reactions: {},
       createdAt: Timestamp.now(),
       expiresAt: Timestamp.fromMillis(expiresAt),
-    });
+    };
+    
+    // Only add optional fields if they have values
+    if (fileName !== undefined) messageData.fileName = fileName;
+    if (fileSize !== undefined) messageData.fileSize = fileSize;
+    
+    const docRef = await addDoc(collection(db, 'messages'), messageData);
 
+    console.log('✅ Message sent successfully:', docRef.id);
     return docRef.id;
   } catch (error) {
-    console.error('Error sending message:', error);
+    console.error('❌ Error sending message:', error);
     throw error;
   }
 }

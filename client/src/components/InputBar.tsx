@@ -47,8 +47,13 @@ export default function InputBar({
    * Handle message submission
    */
   const handleSendMessage = () => {
-    if (!message.trim()) return;
+    console.log('🔘 Send button clicked, message:', message);
+    if (!message.trim()) {
+      console.log('⚠️ Message is empty, returning');
+      return;
+    }
 
+    console.log('📨 Calling onSendMessage...');
     onSendMessage(message, 'text');
     setMessage('');
     
@@ -149,7 +154,7 @@ export default function InputBar({
 
   return (
     <div
-      className="glass-card-dark px-4 py-3 md:px-6 md:py-4 sticky bottom-0 z-40"
+      className="glass-card-dark px-4 py-3 md:px-6 md:py-4 sticky bottom-0 z-50"
       style={{
         borderRadius: 0,
         borderTop: '1px solid rgba(255, 255, 255, 0.1)',

@@ -148,7 +148,7 @@ export default function ChatRoom({ username, onLeave }: ChatRoomProps) {
   };
 
   return (
-    <div className="h-screen w-full flex flex-col" style={{ background: 'var(--background)' }}>
+    <div className="h-screen w-full flex flex-col relative" style={{ background: 'var(--background)' }}>
       {/* Top Bar */}
       <TopBar
         username={username}

@@ -1,45 +1,39 @@
 /**
  * Firebase configuration and initialization
  * 
- * Environment variables required:
- * - VITE_FIREBASE_API_KEY
- * - VITE_FIREBASE_AUTH_DOMAIN
- * - VITE_FIREBASE_PROJECT_ID
- * - VITE_FIREBASE_STORAGE_BUCKET
- * - VITE_FIREBASE_MESSAGING_SENDER_ID
- * - VITE_FIREBASE_APP_ID
- * - VITE_FIREBASE_ROOM_PASSWORD (shared password for joining room)
+ * Uses environment variables if available, falls back to hardcoded config
  */
 
-import { initializeApp } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { getStorage, connectStorageEmulator } from 'firebase/storage';
-import { getDatabase, connectDatabaseEmulator } from 'firebase/database';
+import { initializeApp, getApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
+import { getDatabase } from 'firebase/database';
+
+// Firebase configuration - uses env vars with fallback to hardcoded values
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBhOe6nCG-ZlaDT_qePWqiJBxe8yZukDfM',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'chatventure-f3b0a.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'chatventure-f3b0a',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'chatventure-f3b0a.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '964388625642',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:964388625642:web:d8d0bf7eb742fdf2368b93',
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || 'https://chatventure-f3b0a-default-rtdb.firebaseio.com',
+};
+
+// Shared room password
+export const ROOM_PASSWORD = import.meta.env.VITE_FIREBASE_ROOM_PASSWORD || 'double0nine';
 
 // Check if Firebase config is properly set
 export const isFirebaseConfigured = (): boolean => {
   return !!(
-    import.meta.env.VITE_FIREBASE_API_KEY &&
-    import.meta.env.VITE_FIREBASE_PROJECT_ID &&
-    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN &&
-    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET &&
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID &&
-    import.meta.env.VITE_FIREBASE_APP_ID
+    firebaseConfig.apiKey &&
+    firebaseConfig.projectId &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.storageBucket &&
+    firebaseConfig.messagingSenderId &&
+    firebaseConfig.appId
   );
 };
-
-// Firebase configuration from environment variables
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-};
-
-// Shared room password (stored as environment variable, not in client code)
-export const ROOM_PASSWORD = import.meta.env.VITE_FIREBASE_ROOM_PASSWORD || 'double0nine';
 
 // Initialize Firebase services with error handling
 let app: any = null;
@@ -49,33 +43,28 @@ let realtimeDb: any = null;
 
 try {
   if (isFirebaseConfigured()) {
-    app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-    storage = getStorage(app);
-    realtimeDb = getDatabase(app);
-
-    // Connect to emulators in development (optional)
-    if (import.meta.env.DEV) {
-      try {
-        connectFirestoreEmulator(db, 'localhost', 8080);
-        connectStorageEmulator(storage, 'localhost', 9199);
-        connectDatabaseEmulator(realtimeDb, 'localhost', 9000);
-      } catch (error) {
-        // Emulators might already be connected
-        console.debug('Emulator connection skipped:', error);
-      }
+    // Check if Firebase app already exists
+    try {
+      app = getApp();
+    } catch {
+      // App doesn't exist, create it
+      app = initializeApp(firebaseConfig);
     }
+    
+    // Initialize Firestore
+    db = getFirestore(app);
+    // Disable offline persistence for better compatibility
+    db.settings = { experimentalForceLongPolling: true };
+    
+    // Initialize Storage
+    storage = getStorage(app);
+    
+    // Initialize Realtime Database
+    realtimeDb = getDatabase(app);
+    
+    console.log('✅ Firebase initialized successfully');
   } else {
-    console.warn(
-      'Firebase not configured. Please set the following environment variables:\n' +
-      '- VITE_FIREBASE_API_KEY\n' +
-      '- VITE_FIREBASE_AUTH_DOMAIN\n' +
-      '- VITE_FIREBASE_PROJECT_ID\n' +
-      '- VITE_FIREBASE_STORAGE_BUCKET\n' +
-      '- VITE_FIREBASE_MESSAGING_SENDER_ID\n' +
-      '- VITE_FIREBASE_APP_ID\n' +
-      'See README.md for setup instructions.'
-    );
+    console.warn('Firebase not configured. Please set environment variables or check hardcoded config.');
   }
 } catch (error) {
   console.error('Firebase initialization failed:', error);
