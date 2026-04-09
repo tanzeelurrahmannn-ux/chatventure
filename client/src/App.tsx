@@ -6,12 +6,14 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 
+// Get the base path from Vite's import.meta.env.BASE_URL
+const BASE_PATH = import.meta.env.BASE_URL;
 
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
+      <Route path={BASE_PATH} component={Home} />
+      <Route path={`${BASE_PATH}404`} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
     </Switch>
