@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatVenture</title>
+    <script>
+        // GitHub Pages SPA routing workaround
+        // Redirect 404s to the index page with the original path preserved in query string
+        var path = window.location.pathname;
+        var query = window.location.search;
+        var hash = window.location.hash;
+        
+        // Redirect to index.html with the path preserved
+        if (path !== '/' && !path.includes('.')) {
+            window.location.replace('/chatventure/#' + path.substring('/chatventure'.length) + query + hash);
+        }
+    </script>
+</head>
+<body>
+    <p>Redirecting...</p>
+</body>
+</html>
