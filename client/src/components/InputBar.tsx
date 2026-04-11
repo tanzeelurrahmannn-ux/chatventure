@@ -125,13 +125,19 @@ export default function InputBar({
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        onSendMessage(audioUrl, 'audio', 'voice-note.webm', audioBlob.size);
         
-        if (soundEnabled) {
-          playMessageSentSound();
-        }
-
+        // Convert blob to base64 for storage
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64Audio = reader.result as string;
+          onSendMessage(base64Audio, 'audio', 'voice-note.webm', audioBlob.size);
+          
+          if (soundEnabled) {
+            playMessageSentSound();
+          }
+        };
+        reader.readAsDataURL(audioBlob);
+        
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -181,7 +187,7 @@ export default function InputBar({
               onTyping();
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message... (Shift+Enter for new line)"
+            placeholder="type"
             className="glass-input resize-none"
             style={{
               minHeight: '44px',

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { formatFileSize } from '@/lib/utils';
-import { Download, Play } from 'lucide-react';
+import { Download, Play, Pause } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -23,11 +23,62 @@ interface MessageBubbleProps {
  * - Text messages: simple text in bubble
  * - Image: inline image display
  * - Video: inline video player
- * - Audio: waveform visualization with play button
+ * - Audio: minimal play button with duration in seconds
  * - File: download card with file info
  */
 export default function MessageBubble({ message, isOwn }: MessageBubbleProps) {
   const bubbleClass = isOwn ? 'message-bubble-own' : 'message-bubble-other';
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const updateDuration = () => {
+      setDuration(Math.round(audio.duration));
+    };
+
+    const updateTime = () => {
+      setCurrentTime(Math.round(audio.currentTime));
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    audio.addEventListener('loadedmetadata', updateDuration);
+    audio.addEventListener('timeupdate', updateTime);
+    audio.addEventListener('ended', handleEnded);
+
+    return () => {
+      audio.removeEventListener('loadedmetadata', updateDuration);
+      audio.removeEventListener('timeupdate', updateTime);
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, []);
+
+  const handlePlayPause = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      audio.play().catch(err => console.error('Error playing audio:', err));
+      setIsPlaying(true);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className={bubbleClass}>
@@ -54,27 +105,26 @@ export default function MessageBubble({ message, isOwn }: MessageBubbleProps) {
       )}
 
       {message.type === 'audio' && (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
-            className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
+            onClick={handlePlayPause}
+            className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center hover:opacity-80 transition-opacity"
             style={{
               background: isOwn ? 'rgba(0, 0, 0, 0.2)' : 'var(--neon-cyan)',
               color: isOwn ? 'white' : 'black',
             }}
+            title={isPlaying ? 'Pause' : 'Play'}
           >
-            <Play size={16} fill="currentColor" />
+            {isPlaying ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
           </button>
-          <div className="flex gap-1 items-center flex-1">
-            {[...Array(12)].map((_, i) => (
-              <div
-                key={i}
-                className="waveform-bar"
-                style={{
-                  height: `${Math.random() * 20 + 4}px`,
-                }}
-              />
-            ))}
-          </div>
+          <span className="text-xs opacity-75 font-mono min-w-fit whitespace-nowrap">
+            {formatTime(currentTime)} / {formatTime(duration)}
+          </span>
+          <audio
+            ref={audioRef}
+            src={message.content}
+            onError={(e) => console.error('Audio error:', e)}
+          />
         </div>
       )}
 
